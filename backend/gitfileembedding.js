@@ -70,7 +70,7 @@ async function setupQdrantCollection(QDRANT_COLLECTION_NAME) {
       console.log(`🔵 Qdrant collection "${QDRANT_COLLECTION_NAME}" already exists.`);
     }
   } catch (err) {
-    console.error("❌ Qdrant setup error:", err.message);s
+    console.error("❌ Qdrant setup error:", err.message);
     throw err;
   }
 }
@@ -125,8 +125,9 @@ async function storeEmbeddingsInQdrant(ai, QDRANT_COLLECTION_NAME, baseName, pat
  * Search Qdrant for similar files.
  */
 async function searchSimilarFiles(ai, queryText, QDRANT_COLLECTION_NAME, limit = 3) {
+  console.log("queryText", queryText);
+  
   try {
-    console.log("search function called");
     const model = ai.getGenerativeModel({ model: 'gemini-embedding-exp-03-07' });
     const result = await model.embedContent({
       content: { parts: [{ text: queryText }] },
@@ -156,6 +157,7 @@ async function searchSimilarFiles(ai, queryText, QDRANT_COLLECTION_NAME, limit =
 
 /**
  * Fetch all file paths in a GitHub repository recursively.
+ * Only returns code files (.js, .aspx, .aspx.cs, etc.), ignores .css, .html, images, etc.
  */
 async function fetchGitHubFilesRecursive(branch = 'develop') {
   const apiUrl = `${GITHUB_API_BASE_URL}/repos/${GITHUB_REPO_OWNER}/${GITHUB_REPO}/git/trees/${branch}?recursive=1`;
@@ -167,8 +169,20 @@ async function fetchGitHubFilesRecursive(branch = 'develop') {
   const response = await axios.get(apiUrl, { headers });
   if (!response.data.tree) throw new Error('No tree found in response');
 
+  // Only include code files (.js, .aspx, .aspx.cs, etc.), exclude css, html, images, etc.
+  const CODE_FILE_REGEX = /\.(js|ts|jsx|tsx|py|java|php|cs|cpp|c|go|rb|swift|kt|rs|scala|sh|pl|json|xml|yml|yaml|md|aspx|aspx\.cs)$/i;
+  const EXCLUDE_FILE_REGEX = /\.(css|scss|sass|less|html?|png|jpe?g|gif|svg|bmp|webp|ico|mp3|wav|ogg|mp4|mov|avi|pdf|docx?|xlsx?|pptx?)$/i;
+
   return response.data.tree
-    .filter(item => item.type === 'blob')
+    .filter(item =>
+      item.type === 'blob' &&
+      (
+        CODE_FILE_REGEX.test(item.path) ||
+        item.path.endsWith('.aspx') ||
+        item.path.endsWith('.aspx.cs')
+      ) &&
+      !EXCLUDE_FILE_REGEX.test(item.path)
+    )
     .map(item => ({
       path: item.path,
       basename: path.basename(item.path, path.extname(item.path))
@@ -196,7 +210,7 @@ async function fetchGitHubFileContent(repoName, filePath, branch = 'develop') {
 }
 
 /**
- * Fetch and summarize multiple GitHub files.s
+ * Fetch and summarize multiple GitHub files.
  * @param {string[]} fileNames - Array of file paths.
  * @param {string} repoName - Repository name.
  * @param {string} branch - Branch name (default: 'develop').
