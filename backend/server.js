@@ -109,7 +109,8 @@ const parseEpicContent = (content) => {
       sections[key] = sections[key].trim();
     }
   });
-  sections.summary = sections.summary.replace(/^(Epic Summary:|Summary:)/i, '').trim();
+  //sections.summary = sections.summary.replace(/^(Epic Summary:|Summary:)/i, '').trim();
+  sections.summary = sections.summary.replace(/^(Epic Summary:|Summary:)/i).trim();
   if (sections.summary.length > 150) {
     sections.summary = sections.summary.slice(0, 150);
   }
@@ -381,6 +382,11 @@ if (fields.customfield_10297 && typeof fields.customfield_10297 === "object" && 
 
   //console.log('Extracted Keywords:', keywords);
 
+  // If formPath is empty, use keywords as formPath
+if (!formPath || (Array.isArray(formPath) && formPath.length === 0)) {
+  formPath = keywords;
+}
+
   return {
     id: issue.key,
     summary: fields.summary || "",
@@ -410,7 +416,8 @@ const fetchSimilarTicketsBatch = async (targetTicket, batchSize = 50) => {
   .map(k => `textfields ~ "${k.replace(/"/g, '\\"')}"`)
   .join(' OR ');
 const jql = `type = Enhancement AND status = Released AND project = RSOFT AND key != "${targetTicket.id}" AND (${keywordClauses})`;
-  console.log(`JQL for similar tickets: ${jql}`);
+//const jql = `type IN (Test, "Enhancement Defect", Enhancement) AND status = Released AND project = RSOFT AND key != "${targetTicket.id}" AND (${keywordClauses})`;  
+console.log(`JQL for similar tickets: ${jql}`);
 
   let startAt = 0;
   let allSimilar = [];
@@ -442,7 +449,7 @@ const jql = `type = Enhancement AND status = Released AND project = RSOFT AND ke
         }
       );
       const issues = response.data.issues || [];
-      //console.log(`Fetched ${issues.length} similar tickets (batch starting at ${startAt})`);
+      console.log(`Fetched ${issues.length} similar tickets (batch starting at ${startAt})`);
       allSimilar.push(...issues);
       if (issues.length < batchSize) break;
       startAt += batchSize;
@@ -462,7 +469,12 @@ const jql = `type = Enhancement AND status = Released AND project = RSOFT AND ke
     })
   );
   const filteredTickets = filtered.filter(Boolean);
-  //console.log(`Filtered to ${filteredTickets.length} truly similar tickets:`, filteredTickets.map(t => t.id).join(', '));
+  console.log(`Filtered to ${filteredTickets.length} truly similar tickets:`, filteredTickets.map(t => t.id).join(', '));
+ 
+  if (filteredTickets.length > 0) {
+  const refinedJQL = `key in (${filteredTickets.map(t => t.id).join(', ')})`;
+  console.log("JQL for refined similar tickets:", refinedJQL);
+}
   return filteredTickets;
 };
 
@@ -626,9 +638,9 @@ async function fetchTicketCodeContext(panelName, formPath, branch = 'develop', t
           foundFiles.push(file);
           usedFiles.add(file);
         }
-        if (foundFiles.length >= 10) break; // Limit total results
+        if (foundFiles.length >= 5) break; // Limit total results
       }
-      if (foundFiles.length >= 10) break;
+      if (foundFiles.length >= 5) break;
     }
     fileNames = foundFiles;
   }
@@ -665,11 +677,17 @@ console.log("Fetched code files:", codeFiles);
  
   // Use OpenAI to convert code to plain English
   const prompt = `
-Analyze the following code and perform the following tasks:
-1. Convert the code into a simple plain English technical document.
-2. Extract all input fields in sequence as they will appear on the UI.
-3. Extract the UI flow of the form.
-4. Provide the action of each field and its functionality.
+
+  Analyze the following code and perform the following tasks:
+1. Provide a concise plain English summary of the code’s main purpose and functionality.
+2. List all input fields as they appear on the UI, including:
+   - Field label/name
+   - Data type (e.g., text, number, dropdown)
+   - Required/optional status
+   - Default values or constraints
+3. Describe the UI flow step-by-step, including any conditional logic (e.g., fields that appear/disappear).
+4. For each field, explain its action, validation, and how its value is used.
+5. Summarize any validation rules, error messages, and edge cases.
  
 Code:
 ${codeFiles.plainEnglishDescription}
@@ -753,11 +771,12 @@ ${codeFiles.plainEnglishDescription}
 //   };
 // };
 
-// AGENT 5-aware Epic Generator
+// AGENT 5- Epic Generator(combines all agents)
 const generateEpicFromTickets = async (tickets, similarTicketsMap, codeContext = null) => {
   const codeSection = codeContext
     ? `\n\nCode Context (from panel "${codeContext.repoName}", files: ${codeContext.fileNames.join(', ')}):\n${codeContext.plainEnglishDescription}\n`
     : '';
+    console.log('Code context:', codeContext);
   const prompt = `
 You are a Business Analyst. Based on the following Jira enhancement tickets and their similar tickets, write a comprehensive Jira Epic.
 
@@ -784,7 +803,10 @@ I Want:
 [Describe the key requirements, organized by theme]
 
 Acceptance Criteria:
-[List specific, measurable criteria for success]
+[List each acceptance criterion as a separate, numbered or bulleted item]
+[Each criterion must be specific, measurable, and testable]
+[Focus on what must be true for the requirement to be considered complete]
+[Avoid vague language; use clear conditions and expected outcomes]
 
 So That:
 [The requirement benefits or outcomes expected from this Epic]
